@@ -231,9 +231,85 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   }
 
+  .pause-btn {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    width: 38px;
+    height: 38px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #ffffff1a;
+    background: rgba(20, 26, 38, 0.78);
+    backdrop-filter: blur(6px);
+    color: var(--text);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease;
+    z-index: 3;
+  }
+
+  .pause-btn:hover {
+    background: rgba(27, 36, 51, 0.92);
+    border-color: #ffffff33;
+    transform: translateY(-1px);
+  }
+
+  .pause-btn svg { width: 16px; height: 16px; display: block; }
+
+  .center-msg {
+    position: absolute;
+    inset: 14px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .center-msg.hidden { display: none; }
+
+  .center-msg.paused { background: rgba(10, 14, 22, 0.55); backdrop-filter: blur(2px); }
+
+  .count-num {
+    font-size: 88px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text);
+    text-shadow: 0 0 30px rgba(74, 222, 128, 0.5);
+    animation: pop 0.6s ease;
+  }
+
+  .count-num.go { color: var(--accent); }
+
+  .paused-pill {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    background: rgba(20, 26, 38, 0.9);
+    border: 1px solid #ffffff1f;
+    padding: 10px 22px;
+    border-radius: 999px;
+    text-transform: uppercase;
+  }
+
+  @keyframes pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    35% { transform: scale(1.08); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .count-num { animation: none; }
+  }
+
   @media (max-width: 420px) {
     .title h1 { font-size: 24px; }
     .overlay h2 { font-size: 26px; }
+    .count-num { font-size: 64px; }
   }
 </style>
 </head>
@@ -258,6 +334,10 @@
 
     <div class="board-wrap">
       <canvas id="game" width="440" height="440"></canvas>
+      <button class="pause-btn" id="pauseBtn" aria-label="Pause">
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+      </button>
+      <div class="center-msg hidden" id="centerMsg"></div>
       <div class="overlay" id="overlay">
         <h2 id="ov-title">Ready?</h2>
         <p id="ov-text">Eat the glowing fruit, grow as long as you can, and don't bite your own tail.</p>
@@ -294,11 +374,19 @@
   const ovText = document.getElementById('ov-text');
   const startBtn = document.getElementById('startBtn');
   const speedToggle = document.getElementById('speedToggle');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const centerMsg = document.getElementById('centerMsg');
+
+  const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+  const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.87l11-6.5a1 1 0 0 0 0-1.74l-11-6.5A1 1 0 0 0 8 5.5z"/></svg>';
 
   // --- State (in-memory only; sandbox may block storage) ---
   let snake, dir, nextDir, food, score, best = 0;
   let speed = 90;          // ms per step
   let running = false;
+  let paused = false;
+  let counting = false;    // during the start countdown, logic is frozen
+  let countTimer = null;
   let lastStep = 0;
   let rafId = null;
   let particles = [];      // food-eaten burst
@@ -348,7 +436,13 @@
 
   window.addEventListener('keydown', (e) => {
     if (e.key === ' ' || e.key === 'Enter') {
-      if (!running) { startGame(); e.preventDefault(); }
+      e.preventDefault();
+      if (!running) startGame();
+      else togglePause();
+      return;
+    }
+    if (e.key === 'p' || e.key === 'P') {
+      if (running) togglePause();
       return;
     }
     const nd = keyMap[e.key];
@@ -386,19 +480,76 @@
   });
 
   startBtn.addEventListener('click', startGame);
+  pauseBtn.addEventListener('click', () => togglePause());
 
   // --- Game flow ---
   function startGame() {
     reset();
     running = true;
+    paused = false;
     overlay.classList.add('hidden');
+    pauseBtn.style.display = 'flex';
+    pauseBtn.innerHTML = PAUSE_ICON;
+    lastFrame = performance.now();
     lastStep = performance.now();
     if (rafId) cancelAnimationFrame(rafId);
-    loop(lastStep);
+    loop(performance.now());
+    runCountdown();
+  }
+
+  function runCountdown() {
+    if (countTimer) clearTimeout(countTimer);
+    counting = true;
+    pauseBtn.style.display = 'none'; // can't pause mid-countdown
+    const seq = ['3', '2', '1', 'Go!'];
+    let i = 0;
+    const show = () => {
+      const isGo = i === seq.length - 1;
+      centerMsg.className = 'center-msg';
+      centerMsg.innerHTML = `<span class="count-num${isGo ? ' go' : ''}">${seq[i]}</span>`;
+      // restart the pop animation each tick
+      const num = centerMsg.firstChild;
+      num.style.animation = 'none';
+      void num.offsetWidth;
+      num.style.animation = '';
+      i++;
+      if (i < seq.length) {
+        countTimer = setTimeout(show, 700);
+      } else {
+        countTimer = setTimeout(() => {
+          centerMsg.className = 'center-msg hidden';
+          counting = false;
+          pauseBtn.style.display = 'flex';
+          lastStep = performance.now();
+        }, 550);
+      }
+    };
+    show();
+  }
+
+  function togglePause() {
+    if (!running || counting) return;
+    paused = !paused;
+    if (paused) {
+      centerMsg.className = 'center-msg paused';
+      centerMsg.innerHTML = '<span class="paused-pill">Paused</span>';
+      pauseBtn.innerHTML = PLAY_ICON;
+      pauseBtn.setAttribute('aria-label', 'Resume');
+    } else {
+      centerMsg.className = 'center-msg hidden';
+      pauseBtn.innerHTML = PAUSE_ICON;
+      pauseBtn.setAttribute('aria-label', 'Pause');
+      lastStep = performance.now(); // avoid a jumpy catch-up step
+    }
   }
 
   function gameOver() {
     running = false;
+    paused = false;
+    counting = false;
+    if (countTimer) clearTimeout(countTimer);
+    centerMsg.className = 'center-msg hidden';
+    pauseBtn.style.display = 'none';
     ovTitle.textContent = 'Game Over';
     ovText.textContent = `You scored ${score}. ${score >= best && score > 0 ? "That's a new best!" : 'Try again?'}`;
     startBtn.textContent = 'Play Again';
@@ -567,7 +718,7 @@
     const dt = now - lastFrame;
     lastFrame = now;
 
-    if (running && now - lastStep >= speed) {
+    if (running && !paused && !counting && now - lastStep >= speed) {
       lastStep = now;
       step();
     }
