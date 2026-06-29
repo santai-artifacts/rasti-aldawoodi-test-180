@@ -258,34 +258,6 @@
 
   .pause-btn svg { width: 16px; height: 16px; display: block; }
 
-  .sound-btn {
-    position: absolute;
-    top: 24px;
-    left: 24px;
-    width: 38px;
-    height: 38px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid #ffffff1a;
-    background: rgba(20, 26, 38, 0.78);
-    backdrop-filter: blur(6px);
-    color: var(--text);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-    z-index: 3;
-  }
-
-  .sound-btn:hover {
-    background: rgba(27, 36, 51, 0.92);
-    border-color: #ffffff33;
-    transform: translateY(-1px);
-  }
-
-  .sound-btn.muted { color: var(--muted); }
-  .sound-btn svg { width: 16px; height: 16px; display: block; }
-
   .center-msg {
     position: absolute;
     inset: 14px;
@@ -365,9 +337,6 @@
       <button class="pause-btn" id="pauseBtn" aria-label="Pause">
         <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
       </button>
-      <button class="sound-btn" id="soundBtn" aria-label="Mute">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18.7 6a7 7 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </button>
       <div class="center-msg hidden" id="centerMsg"></div>
       <div class="overlay" id="overlay">
         <h2 id="ov-title">Ready?</h2>
@@ -407,52 +376,9 @@
   const speedToggle = document.getElementById('speedToggle');
   const pauseBtn = document.getElementById('pauseBtn');
   const centerMsg = document.getElementById('centerMsg');
-  const soundBtn = document.getElementById('soundBtn');
 
   const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
   const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.87l11-6.5a1 1 0 0 0 0-1.74l-11-6.5A1 1 0 0 0 8 5.5z"/></svg>';
-  const SPEAKER_ON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18.7 6a7 7 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-  const SPEAKER_OFF = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-
-  // --- Sound (synthesized via Web Audio; no asset files) ---
-  const sound = (() => {
-    let ctx = null, muted = false;
-    function ensure() {
-      if (!ctx) {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) return null;
-        try { ctx = new AC(); } catch (e) { return null; }
-      }
-      if (ctx.state === 'suspended') ctx.resume();
-      return ctx;
-    }
-    function tone(freq, start, dur, type, vol) {
-      const c = ensure();
-      if (!c || muted) return;
-      const t0 = c.currentTime + start;
-      const osc = c.createOscillator();
-      const g = c.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, t0);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      osc.connect(g).connect(c.destination);
-      osc.start(t0);
-      osc.stop(t0 + dur + 0.02);
-    }
-    return {
-      eat() { tone(523.25, 0, 0.09, 'square', 0.16); tone(783.99, 0.05, 0.11, 'square', 0.14); },
-      over() {
-        tone(392.00, 0.00, 0.20, 'sawtooth', 0.16);
-        tone(311.13, 0.16, 0.24, 'sawtooth', 0.16);
-        tone(233.08, 0.36, 0.45, 'sawtooth', 0.18);
-      },
-      unlock() { ensure(); },
-      toggle() { muted = !muted; return muted; },
-      get muted() { return muted; },
-    };
-  })();
 
   // --- State (in-memory only; sandbox may block storage) ---
   let snake, dir, nextDir, food, score, best = 0;
@@ -555,16 +481,9 @@
 
   startBtn.addEventListener('click', startGame);
   pauseBtn.addEventListener('click', () => togglePause());
-  soundBtn.addEventListener('click', () => {
-    const muted = sound.toggle();
-    soundBtn.classList.toggle('muted', muted);
-    soundBtn.innerHTML = muted ? SPEAKER_OFF : SPEAKER_ON;
-    soundBtn.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
-  });
 
   // --- Game flow ---
   function startGame() {
-    sound.unlock(); // resume AudioContext within the user gesture
     reset();
     running = true;
     paused = false;
@@ -625,7 +544,6 @@
   }
 
   function gameOver() {
-    sound.over();
     running = false;
     paused = false;
     counting = false;
@@ -659,7 +577,6 @@
       score += 1;
       updateScore();
       spawnParticles(food.x, food.y);
-      sound.eat();
       placeFood();
     } else {
       snake.pop();
